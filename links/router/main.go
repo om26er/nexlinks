@@ -13,7 +13,7 @@ import (
     "github.com/gammazero/nexus/v3/router"
     "github.com/gammazero/nexus/v3/wamp"
 
-    "github.com/hashicorp/mdns"
+    "github.com/grandcat/zeroconf"
 )
 
 func main() {
@@ -60,7 +60,12 @@ func main() {
     // Set keep-alive period to 30 seconds.
     wss.KeepAlive = 30 * time.Second
 
-    startDiscovery()
+    server, err := zeroconf.Register("GoZeroconf3", "_workstation._tcp", "local.", 8080, []string{"txtv=0", "lo=1", "la=2"}, nil)
+    if err != nil {
+        panic(err)
+    }
+
+    defer server.Shutdown()
 
     // Run websocket server.
     wsAddr := fmt.Sprintf("%s:%d", netAddr, wsPort)
@@ -104,16 +109,4 @@ func worldTime(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
     results := wamp.List{fmt.Sprintf("UTC: %s", now.UTC())}
 
     return client.InvokeResult{Args: results}
-}
-
-func startDiscovery()  {
-    // Setup our service export
-    host, _ := os.Hostname()
-    info := []string{"My awesome service"}
-    service, _ := mdns.NewMDNSService(host, "_foobar._tcp", "", "", 8000, nil, info)
-
-    // Create the mDNS server, defer shutdown
-    server, _ := mdns.NewServer(&mdns.Config{Zone: service})
-    defer server.Shutdown()
-
 }
