@@ -58,6 +58,15 @@ func main() {
     // Set keep-alive period to 30 seconds.
     wss.KeepAlive = 30 * time.Second
 
+    // Run websocket server.
+    wsAddr := fmt.Sprintf("%s:%d", netAddr, wsPort)
+    wsCloser, err := wss.ListenAndServe(wsAddr)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer wsCloser.Close()
+    log.Printf("Websocket server listening on ws://%s/", wsAddr)
+
     // Wait for SIGINT (CTRL-c), then close servers and exit.
     shutdown := make(chan os.Signal, 1)
     signal.Notify(shutdown, os.Interrupt)
