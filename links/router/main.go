@@ -12,6 +12,8 @@ import (
     "github.com/gammazero/nexus/v3/client"
     "github.com/gammazero/nexus/v3/router"
     "github.com/gammazero/nexus/v3/wamp"
+
+    "github.com/hashicorp/mdns"
 )
 
 func main() {
@@ -58,6 +60,8 @@ func main() {
     // Set keep-alive period to 30 seconds.
     wss.KeepAlive = 30 * time.Second
 
+    startDiscovery()
+
     // Run websocket server.
     wsAddr := fmt.Sprintf("%s:%d", netAddr, wsPort)
     wsCloser, err := wss.ListenAndServe(wsAddr)
@@ -99,18 +103,17 @@ func worldTime(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
     now := time.Now()
     results := wamp.List{fmt.Sprintf("UTC: %s", now.UTC())}
 
-    for _, arg := range inv.Arguments {
-        locName, ok := wamp.AsString(arg)
-        if !ok {
-            continue
-        }
-        loc, err := time.LoadLocation(locName)
-        if err != nil {
-            results = append(results, fmt.Sprintf("%s: %s", locName, err))
-            continue
-        }
-        results = append(results, fmt.Sprintf("%s: %s", locName, now.In(loc)))
-    }
-
     return client.InvokeResult{Args: results}
+}
+
+func startDiscovery()  {
+    // Setup our service export
+    host, _ := os.Hostname()
+    info := []string{"My awesome service"}
+    service, _ := mdns.NewMDNSService(host, "_foobar._tcp", "", "", 8000, nil, info)
+
+    // Create the mDNS server, defer shutdown
+    server, _ := mdns.NewServer(&mdns.Config{Zone: service})
+    defer server.Shutdown()
+
 }
