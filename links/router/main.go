@@ -16,6 +16,10 @@ import (
     "github.com/grandcat/zeroconf"
 )
 
+const (
+    metaOnJoin  = string(wamp.MetaEventSessionOnJoin)
+)
+
 func main() {
     var (
         realm = "realm1"
@@ -50,6 +54,8 @@ func main() {
         log.Fatal(err)
     }
     defer callee.Close()
+
+    subscribeMetaOnJoin(nxr, realm)
 
     // Create websocket server.
     wss := router.NewWebsocketServer(nxr)
@@ -109,4 +115,35 @@ func worldTime(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
     results := wamp.List{fmt.Sprintf("UTC: %s", now.UTC())}
 
     return client.InvokeResult{Args: results}
+}
+
+func subscribeMetaOnJoin(nxr router.Router, realm string) {
+    logger := log.New(os.Stdout, "CALLEE> ", log.LstdFlags)
+    cfg := client.Config{
+        Realm:  realm,
+        Logger: logger,
+    }
+    cli, err := client.ConnectLocal(nxr, cfg)
+    if err != nil {
+        return
+    }
+    // Define function to handle on_join events received.
+    onJoin := func(event *wamp.Event) {
+        if len(event.Arguments) != 0 {
+            if details, ok := wamp.AsDict(event.Arguments[0]); ok {
+                onJoinID, _ := wamp.AsID(details["session"])
+                authid, _ := wamp.AsString(details["authid"])
+                logger.Printf("Client %v joined realm (authid=%s)\n", onJoinID, authid)
+                return
+            }
+        }
+        logger.Println("Client joined realm - no data provided")
+    }
+
+    // Subscribe to on_join topic.
+    err = cli.Subscribe(metaOnJoin, onJoin, nil)
+    if err != nil {
+        logger.Fatal("subscribe error:", err)
+    }
+    logger.Println("Subscribed to", metaOnJoin)
 }
