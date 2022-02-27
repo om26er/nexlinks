@@ -4,6 +4,7 @@ import (
     "context"
     "flag"
     "fmt"
+    "github.com/gammazero/nexus/v3/router/auth"
     "log"
     "os"
     "os/signal"
@@ -18,6 +19,10 @@ import (
 
 const (
     metaOnJoin  = string(wamp.MetaEventSessionOnJoin)
+    metaProcRegList = string(wamp.MetaProcRegList)
+    metaProcRegGet = string(wamp.MetaProcRegGet)
+    metaEventRegOnCreate = string(wamp.MetaEventRegOnCreate)
+    metaEventRegOnDelete = string(wamp.MetaEventRegOnDelete)
 )
 
 func main() {
@@ -31,6 +36,8 @@ func main() {
     flag.StringVar(&realm, "realm", realm, "realm name")
     flag.Parse()
 
+    cryptosign := auth.NewCryptoSignAuthenticator()
+
     // Create router instance.
     routerConfig := &router.Config{
         RealmConfigs: []*router.RealmConfig{
@@ -38,9 +45,12 @@ func main() {
                 URI:           wamp.URI(realm),
                 AnonymousAuth: true,
                 AllowDisclose: true,
+                MetaStrict: true,
+                Authenticators: []auth.Authenticator{cryptosign},
             },
         },
     }
+
     nxr, err := router.NewRouter(routerConfig, nil)
     if err != nil {
         log.Fatal(err)
@@ -55,20 +65,19 @@ func main() {
     }
     defer callee.Close()
 
-    subscribeMetaOnJoin(nxr, realm)
+    subscribeMetaOnRegCreate(nxr, realm)
 
     // Create websocket server.
     wss := router.NewWebsocketServer(nxr)
-    // Enable websocket compression, which is used if clients request it.
     wss.Upgrader.EnableCompression = true
-    // Configure server to send and look for client tracking cookie.
     wss.EnableTrackingCookie = true
-    // Set keep-alive period to 30 seconds.
     wss.KeepAlive = 30 * time.Second
 
-    server, err := zeroconf.Register("GoZeroconf3", "_workstation._tcp", "local.", 8080, []string{"txtv=0", "lo=1", "la=2"}, nil)
+    server, err := zeroconf.Register("GoZeroconf3", "_workstation._tcp", "local.", 8080,
+        []string{fmt.Sprintf("realm=%s", realm)}, nil)
+
     if err != nil {
-        panic(err)
+        log.Fatal(err)
     }
 
     defer server.Shutdown()
@@ -76,9 +85,11 @@ func main() {
     // Run websocket server.
     wsAddr := fmt.Sprintf("%s:%d", netAddr, wsPort)
     wsCloser, err := wss.ListenAndServe(wsAddr)
+
     if err != nil {
         log.Fatal(err)
     }
+
     defer wsCloser.Close()
     log.Printf("Websocket server listening on ws://%s/", wsAddr)
 
@@ -90,7 +101,7 @@ func main() {
 }
 
 func createLocalCallee(nxr router.Router, realm string) (*client.Client, error) {
-    logger := log.New(os.Stdout, "CALLEE> ", log.LstdFlags)
+    logger := log.New(os.Stdout, "", log.LstdFlags)
     cfg := client.Config{
         Realm:  realm,
         Logger: logger,
@@ -101,7 +112,7 @@ func createLocalCallee(nxr router.Router, realm string) (*client.Client, error) 
     }
 
     // Register procedure "time"
-    const timeProc = "worldtime"
+    const timeProc = "pk.codebase.time"
     if err = callee.Register(timeProc, worldTime, nil); err != nil {
         return nil, fmt.Errorf("Failed to register %q: %s", timeProc, err)
     }
@@ -117,8 +128,8 @@ func worldTime(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
     return client.InvokeResult{Args: results}
 }
 
-func subscribeMetaOnJoin(nxr router.Router, realm string) {
-    logger := log.New(os.Stdout, "CALLEE> ", log.LstdFlags)
+func subscribeMetaOnRegCreate(nxr router.Router, realm string) {
+    logger := log.New(os.Stdout, "", log.LstdFlags)
     cfg := client.Config{
         Realm:  realm,
         Logger: logger,
@@ -127,23 +138,26 @@ func subscribeMetaOnJoin(nxr router.Router, realm string) {
     if err != nil {
         return
     }
-    // Define function to handle on_join events received.
-    onJoin := func(event *wamp.Event) {
+
+    onRegCreate := func(event *wamp.Event) {
+
         if len(event.Arguments) != 0 {
-            if details, ok := wamp.AsDict(event.Arguments[0]); ok {
-                onJoinID, _ := wamp.AsID(details["session"])
-                authid, _ := wamp.AsString(details["authid"])
-                logger.Printf("Client %v joined realm (authid=%s)\n", onJoinID, authid)
-                return
+            id, ok := wamp.AsID(event.Arguments[0])
+            if ok {
+                println(id)
+            }
+
+            if details, ok := wamp.AsDict(event.Arguments[1]); ok {
+                if uri, ok := wamp.AsString(details["uri"]); ok {
+                    println(uri)
+                }
             }
         }
-        logger.Println("Client joined realm - no data provided")
     }
 
-    // Subscribe to on_join topic.
-    err = cli.Subscribe(metaOnJoin, onJoin, nil)
+    err = cli.Subscribe(metaEventRegOnCreate, onRegCreate, nil)
     if err != nil {
         logger.Fatal("subscribe error:", err)
     }
-    logger.Println("Subscribed to", metaOnJoin)
+    logger.Println("Subscribed to", metaEventRegOnCreate)
 }
