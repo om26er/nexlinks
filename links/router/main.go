@@ -2,6 +2,8 @@ package main
 
 import (
     "context"
+    "encoding/hex"
+    "errors"
     "flag"
     "fmt"
     "github.com/gammazero/nexus/v3/router/auth"
@@ -17,6 +19,11 @@ import (
     "github.com/grandcat/zeroconf"
 )
 
+type keyStore struct {
+    provider string
+    publicKey   string
+}
+
 const (
     metaOnJoin  = string(wamp.MetaEventSessionOnJoin)
     metaProcRegList = string(wamp.MetaProcRegList)
@@ -24,6 +31,31 @@ const (
     metaEventRegOnCreate = string(wamp.MetaEventRegOnCreate)
     metaEventRegOnDelete = string(wamp.MetaEventRegOnDelete)
 )
+
+func (ks *keyStore) AuthKey(authid, authmethod string) ([]byte, error) {
+    if authid != "jdoe" {
+        return nil, errors.New("no such user: " + authid)
+    }
+    switch authmethod {
+    case "cryptosign":
+        // Lookup the user's key.
+        return hex.DecodeString(ks.publicKey)
+    }
+    return nil, errors.New("unsupported authmethod")
+}
+
+func (ks *keyStore) AuthRole(authid string) (string, error) {
+    if authid != "jdoe" {
+        return "", errors.New("no such user: " + authid)
+    }
+    return "user", nil
+}
+
+func (ks *keyStore) PasswordInfo(authid string) (string, int, int) {
+    return "", 0, 0
+}
+
+func (ks *keyStore) Provider() string { return ks.provider }
 
 func main() {
     var (
@@ -36,14 +68,20 @@ func main() {
     flag.StringVar(&realm, "realm", realm, "realm name")
     flag.Parse()
 
-    cryptosign := auth.NewCryptoSignAuthenticator()
+    var tks = &keyStore{
+        provider:  "static",
+        // Private key is af9a1c7368017bc712153c3deaa44da8a6405882e19bf56c7be8b306e99e25e0
+        publicKey: "c5f6e2243f1777007093117bc4f2b8e3f7c3df139fbfcf0968bf819a13af6d07",
+    }
+
+    cryptosign := auth.NewCryptoSignAuthenticator(tks, 10 * time.Second)
 
     // Create router instance.
     routerConfig := &router.Config{
         RealmConfigs: []*router.RealmConfig{
             &router.RealmConfig{
                 URI:           wamp.URI(realm),
-                AnonymousAuth: true,
+                AnonymousAuth: false,
                 AllowDisclose: true,
                 MetaStrict: true,
                 Authenticators: []auth.Authenticator{cryptosign},
