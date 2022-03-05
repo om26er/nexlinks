@@ -3,3 +3,6 @@ build:
 
 run:
 	go run github.com/om26er/nexlinks/links/router
+
+clean:
+	rm -f router
