@@ -62,14 +62,6 @@ func main() {
     }
     defer nxr.Close()
 
-    // create local (embedded) RPC callee client that provides the time in the
-    // requested timezones.
-    callee, err := createLocalCallee(nxr, realm)
-    if err != nil {
-        log.Fatal(err)
-    }
-    defer callee.Close()
-
     // Create websocket server.
     wss := router.NewWebsocketServer(nxr)
     wss.Upgrader.EnableCompression = true
@@ -110,34 +102,6 @@ func main() {
     signal.Notify(shutdown, os.Interrupt)
     <-shutdown
     // Servers close at exit due to defer calls.
-}
-
-func createLocalCallee(nxr router.Router, realm string) (*client.Client, error) {
-    logger := log.New(os.Stdout, "", log.LstdFlags)
-    cfg := client.Config{
-        Realm:  realm,
-        Logger: logger,
-    }
-    callee, err := client.ConnectLocal(nxr, cfg)
-    if err != nil {
-        return nil, err
-    }
-
-    // Register procedure "time"
-    const timeProc = "pk.codebase.time"
-    if err = callee.Register(timeProc, worldTime, nil); err != nil {
-        return nil, fmt.Errorf("Failed to register %q: %s", timeProc, err)
-    }
-    log.Printf("Registered procedure %q with router", timeProc)
-
-    return callee, nil
-}
-
-func worldTime(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-    now := time.Now()
-    results := wamp.List{fmt.Sprintf("UTC: %s", now.UTC())}
-
-    return client.InvokeResult{Args: results}
 }
 
 func subscribeMetaOnRegCreate(nxr router.Router, realm string, session *client.Client) {
