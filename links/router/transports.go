@@ -19,3 +19,10 @@ func SetupWebSocketTransport(localRouter router.Router, netAddr string, wsPort i
 	wsAddr := fmt.Sprintf("%s:%d", netAddr, wsPort)
 	return wss.ListenAndServe(wsAddr)
 }
+
+
+func SetupUNIXSocketTransport(localRouter *router.Router, unixSocketPath string) (io.Closer, error) {
+	// Run rawsocket Unix server.
+	rss := router.NewRawSocketServer(*localRouter)
+	return rss.ListenAndServe("unix", unixSocketPath)
+}

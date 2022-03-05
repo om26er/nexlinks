@@ -2,7 +2,6 @@ package main
 
 import (
     "flag"
-    "io"
     "log"
     "os"
     "os/signal"
@@ -42,7 +41,7 @@ func main() {
 
     flag.StringVar(&linkPrivateKey, "link-private-key", linkPrivateKey, "RLink private key")
     flag.StringVar(&linkRealm, "link-realm", linkRealm, "RLink realm")
-    flag.StringVar(&linkRouterURL, "link-url", linkRealm, "RLink URL")
+    flag.StringVar(&linkRouterURL, "link-url", linkRouterURL, "RLink URL")
     flag.IntVar(&linkReconnectSeconds, "link-reconnect-interval", linkReconnectSeconds, "RLink reconnect interval")
     flag.Parse()
 
@@ -60,22 +59,30 @@ func main() {
     }
 
     nxr, err := router.NewRouter(routerConfig, nil)
-    if err != nil {
+    if err == nil {
+        defer nxr.Close()
+    } else {
         log.Fatal(err)
     }
-    defer nxr.Close()
 
+    // Setup listening websocket transport
     wsCloser, err := SetupWebSocketTransport(nxr, netAddr, wsPort)
-    if err != nil {
+    if err == nil {
+        log.Printf("Websocket server listening on ws://%s:%d/ws", netAddr, wsPort)
+        _ = wsCloser.Close()
+    } else {
         log.Fatal(err)
     }
-    defer func(wsCloser io.Closer) {
-        err := wsCloser.Close()
-        if err != nil {
-            log.Println("WEBSOCKET TRANSPORT CLOSED")
-        }
-    }(wsCloser)
-    log.Printf("Websocket server listening on ws://%s:%d/ws", netAddr, wsPort)
+
+    // Setup listening unix socket transport
+    sockPath := "/tmp/nexus.sock"
+    udsCloser, err := SetupUNIXSocketTransport(&nxr, sockPath)
+    if err == nil {
+        log.Printf("UDS listening on unix://%s", sockPath)
+        _ = udsCloser.Close()
+    } else {
+        log.Fatal(err)
+    }
 
     // FIXME: make service discovery configurable
     mdns, _ := PublishName(realm, "st")
@@ -90,4 +97,3 @@ func main() {
     signal.Notify(shutdown, os.Interrupt)
     <-shutdown
 }
-
