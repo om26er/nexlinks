@@ -11,6 +11,7 @@ import (
     "log"
     "os"
     "os/signal"
+    "strings"
     "time"
 
     "github.com/gammazero/nexus/v3/client"
@@ -21,8 +22,8 @@ import (
 )
 
 const (
-    //metaProcRegList = string(wamp.MetaProcRegList)
-    //metaProcRegGet = string(wamp.MetaProcRegGet)
+    metaProcRegList = string(wamp.MetaProcRegList)
+    metaProcRegGet = string(wamp.MetaProcRegGet)
     metaEventRegOnCreate = string(wamp.MetaEventRegOnCreate)
     metaEventRegOnDelete = string(wamp.MetaEventRegOnDelete)
     metaEventSubOnCreate = string(wamp.MetaEventSubOnCreate)
@@ -43,12 +44,13 @@ func main() {
 
     // Create router instance.
     routerConfig := &router.Config{
-        RealmConfigs: []*router.RealmConfig{
+            RealmConfigs: []*router.RealmConfig{
             {
                 URI:           wamp.URI(realm),
                 AnonymousAuth: true,
                 AllowDisclose: true,
-                MetaStrict: true,
+                MetaStrict: false,
+                StrictURI: false,
             },
         },
     }
@@ -77,13 +79,7 @@ func main() {
 
     // PUBKEY IS 81deeb0a11c4f3919e6c35adc1980516dfd8ca84e01929b51070d6a7d3e6c012
     cfg := constructLinkConfig("1c0ecd558e88e9fc51c10e0373a582bdb11db7d14e9bd514fa2703a92b7a5617", "realm1")
-    session, err := connectRemoteLeg("tcp://localhost:8081", cfg, nxr, 10)
-    if err == nil {
-        log.Println("Established remote connection")
-        log.Println(session)
-    }
-
-    defer session.Done()
+    connectRemoteLeg("tcp://localhost:8081", &cfg, &nxr, 2)
 
     // Wait for SIGINT (CTRL-c), then close servers and exit.
     shutdown := make(chan os.Signal, 1)
@@ -160,7 +156,40 @@ func setupInvocationForwarding(localSession *client.Client, remoteSession *clien
         }
     }
 
-    err := localSession.Subscribe(metaEventRegOnCreate, onRegCreate, nil)
+    // Return IDs for all currently registered procedures on the router
+    result, err := localSession.Call(context.Background(), metaProcRegList, nil, nil, nil, nil)
+    if idMap, ok := wamp.AsDict(result.Arguments[0]); ok {
+        if idsExact, ok := wamp.AsList(idMap["exact"]); ok {
+            for _, id := range idsExact {
+                result, err := localSession.Call(context.Background(), metaProcRegGet, nil, wamp.List{id}, nil, nil)
+                if err == nil {
+                    regDetails, _ := wamp.AsDict(result.Arguments[0])
+                    uri, _ := wamp.AsString(regDetails["uri"])
+                    // Don't try to forward internal procedures
+                    if !strings.HasPrefix(uri, "wamp.") {
+
+                        invocationHandler := func(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
+                            response, _ := localSession.Call(ctx, uri, wamp.Dict{}, inv.Arguments, inv.ArgumentsKw, nil)
+                            return client.InvokeResult{Args: response.Arguments, Kwargs: response.ArgumentsKw}
+                        }
+
+                        err := remoteSession.Register(uri, invocationHandler, nil)
+                        if err != nil {
+                            log.Println("We got a problem here....")
+                        } else {
+                            if id, ok := wamp.AsID(id); ok {
+                                regs[int(id)] = uri
+                            }
+                        }
+                    }
+                } else {
+                    log.Println(err, id)
+                }
+            }
+        }
+    }
+
+    err = localSession.Subscribe(metaEventRegOnCreate, onRegCreate, nil)
     if err != nil {
         log.Fatal("subscribe error:", err)
     }
@@ -259,26 +288,33 @@ func constructLinkConfig(privateKeyHex string, realm string) client.Config {
     return cfg
 }
 
-func connectRemoteLeg(remoteRouterURL string, config client.Config, localRouter router.Router,
-    reconnectSeconds time.Duration) (*client.Client, error) {
+func connectRemoteLeg(remoteRouterURL string, config *client.Config, localRouter *router.Router,
+    reconnectSeconds time.Duration) {
 
-    remoteSession, err := client.ConnectNet(context.Background(), remoteRouterURL, config)
+    remoteSession, err := client.ConnectNet(context.Background(), remoteRouterURL, *config)
 
     if err != nil {
         log.Println(fmt.Sprintf("Unable to connect to remote leg, retrying in %d seconds", reconnectSeconds))
         time.Sleep(reconnectSeconds * time.Second)
-        return connectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
+        connectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
     } else {
+        log.Println("Established remote connection")
+
         logger := log.New(os.Stdout, "", log.LstdFlags)
         cfg := client.Config{
             Realm:  config.Realm,
             Logger: logger,
         }
-        localSession, _ := client.ConnectLocal(localRouter, cfg)
+        localSession, _ := client.ConnectLocal(*localRouter, cfg)
 
         setupInvocationForwarding(localSession, remoteSession)
         setupEventForwarding(localSession, remoteSession)
     }
 
-    return remoteSession, err
+    select {
+    case <- remoteSession.Done():
+        connectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
+    }
+
+    //return remoteSession, err
 }
