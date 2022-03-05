@@ -26,6 +26,9 @@ const (
     metaProcRegGet = string(wamp.MetaProcRegGet)
     metaEventRegOnCreate = string(wamp.MetaEventRegOnCreate)
     metaEventRegOnDelete = string(wamp.MetaEventRegOnDelete)
+
+    metaProcSubList = string(wamp.MetaProcSubList)
+    metaProcSubGet = string(wamp.MetaProcSubGet)
     metaEventSubOnCreate = string(wamp.MetaEventSubOnCreate)
     metaEventSubOnDelete = string(wamp.MetaEventSubOnDelete)
 )
@@ -244,7 +247,42 @@ func setupEventForwarding(localSession *client.Client, remoteSession *client.Cli
         }
     }
 
-    err := localSession.Subscribe(metaEventSubOnCreate, onSubCreate, nil)
+    // Return IDs for all currently registered procedures on the router
+    result, err := localSession.Call(context.Background(), metaProcSubList, nil, nil, nil, nil)
+    if idMap, ok := wamp.AsDict(result.Arguments[0]); ok {
+        if idsExact, ok := wamp.AsList(idMap["exact"]); ok {
+            for _, id := range idsExact {
+                result, err := localSession.Call(context.Background(), metaProcSubGet, nil, wamp.List{id}, nil, nil)
+                if err == nil {
+                    regDetails, _ := wamp.AsDict(result.Arguments[0])
+                    uri, _ := wamp.AsString(regDetails["uri"])
+                    // Don't try to forward internal procedures
+                    if !strings.HasPrefix(uri, "wamp.") {
+
+                        eventHandler := func(event *wamp.Event) {
+                            err := localSession.Publish(uri, wamp.Dict{}, event.Arguments, event.ArgumentsKw)
+                            if err != nil {
+                                return
+                            }
+                        }
+
+                        err := remoteSession.Subscribe(uri, eventHandler, nil)
+                        if err != nil {
+                            log.Println("We got a problem here....")
+                        } else {
+                            if id, ok := wamp.AsID(id); ok {
+                                subs[int(id)] = uri
+                            }
+                        }
+                    }
+                } else {
+                    log.Println(err, id)
+                }
+            }
+        }
+    }
+
+    err = localSession.Subscribe(metaEventSubOnCreate, onSubCreate, nil)
     if err != nil {
         log.Fatal("subscribe error:", err)
     }
