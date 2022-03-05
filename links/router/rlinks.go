@@ -20,33 +20,38 @@ import (
 func ConnectRemoteLeg(remoteRouterURL string, config *client.Config, localRouter *router.Router,
 	reconnectSeconds time.Duration) {
 
+	logger := log.New(os.Stdout, "RLINK ", log.LstdFlags)
+
 	remoteSession, err := client.ConnectNet(context.Background(), remoteRouterURL, *config)
 
 	if err != nil {
-		log.Println(fmt.Sprintf("Unable to connect to remote leg, retrying in %d seconds", reconnectSeconds))
-		time.Sleep(reconnectSeconds * time.Second)
-		ConnectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
+		logger.Println(fmt.Sprintf("Unable to connect to remote leg, retrying in %d seconds", reconnectSeconds))
+		time.AfterFunc(reconnectSeconds * time.Second, func() {
+			ConnectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
+		})
 	} else {
-		log.Println("Established remote connection")
+		logger.Println("Established remote connection")
 
-		logger := log.New(os.Stdout, "", log.LstdFlags)
 		cfg := client.Config{
 			Realm:  config.Realm,
 			Logger: logger,
 		}
 		localSession, _ := client.ConnectLocal(*localRouter, cfg)
 
-		SetupInvocationForwarding(localSession, remoteSession)
-		SetupEventForwarding(localSession, remoteSession)
-	}
+		SetupInvocationForwarding(localSession, remoteSession, logger)
+		SetupEventForwarding(localSession, remoteSession, logger)
 
-	select {
-	case <- remoteSession.Done():
-		ConnectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
+		select {
+		case <- remoteSession.Done():
+			logger.Println(fmt.Sprintf("Disconnected from remote leg, retrying in %d seconds", reconnectSeconds))
+			time.AfterFunc(reconnectSeconds * time.Second, func() {
+				ConnectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
+			})
+		}
 	}
 }
 
-func SetupInvocationForwarding(localSession *client.Client, remoteSession *client.Client) {
+func SetupInvocationForwarding(localSession *client.Client, remoteSession *client.Client, logger *log.Logger) {
 
 	regs := make(map[int]string)
 
@@ -54,7 +59,7 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 		if len(event.Arguments) > 0 {
 			id, ok := wamp.AsID(event.Arguments[0])
 			if ok {
-				log.Println(id)
+				logger.Println(id)
 			}
 
 			if details, ok := wamp.AsDict(event.Arguments[1]); ok {
@@ -67,7 +72,7 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 
 					err := remoteSession.Register(uri, invocationHandler, wamp.Dict{})
 					if err != nil {
-						log.Println("We got a problem here....")
+						logger.Println("We got a problem here....")
 					} else {
 						regs[int(id)] = uri
 					}
@@ -108,7 +113,7 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 
 						err := remoteSession.Register(uri, invocationHandler, nil)
 						if err != nil {
-							log.Println("We got a problem here....")
+							logger.Println("We got a problem here....")
 						} else {
 							if id, ok := wamp.AsID(id); ok {
 								regs[int(id)] = uri
@@ -116,7 +121,7 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 						}
 					}
 				} else {
-					log.Println(err, id)
+					logger.Println(err, id)
 				}
 			}
 		}
@@ -124,18 +129,18 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 
 	err = localSession.Subscribe(metaEventRegOnCreate, onRegCreate, nil)
 	if err != nil {
-		log.Fatal("subscribe error:", err)
+		logger.Fatal("subscribe error:", err)
 	}
-	log.Println("Subscribed to", metaEventRegOnCreate)
+	logger.Println("Subscribed to", metaEventRegOnCreate)
 
 	err = localSession.Subscribe(metaEventRegOnDelete, onRegDelete, nil)
 	if err != nil {
-		log.Fatal("subscribe error:", err)
+		logger.Fatal("subscribe error:", err)
 	}
-	log.Println("Subscribed to", metaEventRegOnDelete)
+	logger.Println("Subscribed to", metaEventRegOnDelete)
 }
 
-func SetupEventForwarding(localSession *client.Client, remoteSession *client.Client) {
+func SetupEventForwarding(localSession *client.Client, remoteSession *client.Client, logger *log.Logger) {
 	subs := make(map[int]string)
 
 	onSubCreate := func(event *wamp.Event) {
@@ -143,7 +148,7 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 			id, _ := wamp.AsID(event.Arguments[0])
 
 			if details, ok := wamp.AsDict(event.Arguments[1]); ok {
-				log.Println(event.Arguments[1])
+				logger.Println(event.Arguments[1])
 				if topic, ok := wamp.AsString(details["uri"]); ok {
 					eventHandler := func(event *wamp.Event) {
 						err := localSession.Publish(topic, wamp.Dict{}, event.Arguments, event.ArgumentsKw)
@@ -154,7 +159,7 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 
 					err := remoteSession.Subscribe(topic, eventHandler, nil)
 					if err != nil {
-						log.Println("We got a problem here....")
+						logger.Println("We got a problem here....")
 					} else {
 						subs[int(id)] = topic
 					}
@@ -171,7 +176,7 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 					// Success of failure, we need to remove registration from our store
 					_ = remoteSession.Unsubscribe(uri)
 					delete(subs, int(id))
-					log.Println(fmt.Sprintf("Unsubscribed topic %s", uri))
+					logger.Println(fmt.Sprintf("Unsubscribed topic %s", uri))
 				}
 			}
 		}
@@ -198,7 +203,7 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 
 						err := remoteSession.Subscribe(uri, eventHandler, nil)
 						if err != nil {
-							log.Println("We got a problem here....")
+							logger.Println("We got a problem here....")
 						} else {
 							if id, ok := wamp.AsID(id); ok {
 								subs[int(id)] = uri
@@ -206,7 +211,7 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 						}
 					}
 				} else {
-					log.Println(err, id)
+					logger.Println(err, id)
 				}
 			}
 		}
@@ -214,15 +219,15 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 
 	err = localSession.Subscribe(metaEventSubOnCreate, onSubCreate, nil)
 	if err != nil {
-		log.Fatal("subscribe error:", err)
+		logger.Fatal("subscribe error:", err)
 	}
-	log.Println("Subscribed to", metaEventSubOnCreate)
+	logger.Println("Subscribed to", metaEventSubOnCreate)
 
 	err = localSession.Subscribe(metaEventSubOnDelete, onSubDelete, nil)
 	if err != nil {
-		log.Fatal("subscribe error:", err)
+		logger.Fatal("subscribe error:", err)
 	}
-	log.Println("Subscribed to", metaEventSubOnDelete)
+	logger.Println("Subscribed to", metaEventSubOnDelete)
 }
 
 func ConstructLinkConfig(privateKeyHex string, realm string) client.Config {
