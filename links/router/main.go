@@ -7,6 +7,7 @@ import (
     "fmt"
     "github.com/gammazero/nexus/v3/transport/serialize"
     "golang.org/x/crypto/ed25519"
+    "io"
     "log"
     "os"
     "os/signal"
@@ -19,15 +20,9 @@ import (
     "github.com/grandcat/zeroconf"
 )
 
-type keyStore struct {
-    provider string
-    publicKey   string
-}
-
 const (
-    metaOnJoin  = string(wamp.MetaEventSessionOnJoin)
-    metaProcRegList = string(wamp.MetaProcRegList)
-    metaProcRegGet = string(wamp.MetaProcRegGet)
+    //metaProcRegList = string(wamp.MetaProcRegList)
+    //metaProcRegGet = string(wamp.MetaProcRegGet)
     metaEventRegOnCreate = string(wamp.MetaEventRegOnCreate)
     metaEventRegOnDelete = string(wamp.MetaEventRegOnDelete)
 )
@@ -62,12 +57,52 @@ func main() {
     }
     defer nxr.Close()
 
+    wsCloser, err := setupWebSocketTransport(nxr, netAddr, wsPort)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer func(wsCloser io.Closer) {
+        err := wsCloser.Close()
+        if err != nil {
+            log.Println("WEBSOCKET TRANSPORT CLOSED")
+        }
+    }(wsCloser)
+    log.Printf("Websocket server listening on ws://%s:%d/", netAddr, wsPort)
+
+    // FIXME: make service discovery configurable
+    mdns := publishName(realm)
+    defer mdns.Shutdown()
+
+    // PUBKEY IS 81deeb0a11c4f3919e6c35adc1980516dfd8ca84e01929b51070d6a7d3e6c012
+    cfg := constructLinkConfig("1c0ecd558e88e9fc51c10e0373a582bdb11db7d14e9bd514fa2703a92b7a5617", "realm1")
+    session, err := connectRemoteLeg("tcp://localhost:8081", cfg, nxr, 10)
+    if err == nil {
+        log.Println("Established remote connection")
+        log.Println(session)
+    }
+
+    defer session.Done()
+
+    // Wait for SIGINT (CTRL-c), then close servers and exit.
+    shutdown := make(chan os.Signal, 1)
+    signal.Notify(shutdown, os.Interrupt)
+    <-shutdown
+    // Servers close at exit due to defer calls.
+}
+
+func setupWebSocketTransport(localRouter router.Router, netAddr string, wsPort int) (io.Closer, error) {
     // Create websocket server.
-    wss := router.NewWebsocketServer(nxr)
+    wss := router.NewWebsocketServer(localRouter)
     wss.Upgrader.EnableCompression = true
     wss.EnableTrackingCookie = true
     wss.KeepAlive = 30 * time.Second
 
+    // Run websocket server.
+    wsAddr := fmt.Sprintf("%s:%d", netAddr, wsPort)
+    return wss.ListenAndServe(wsAddr)
+}
+
+func publishName(realm string) *zeroconf.Server {
     hostname, _ := os.Hostname()
 
     server, err := zeroconf.Register(hostname, "_st._tcp", "local.", 8080,
@@ -77,91 +112,82 @@ func main() {
         log.Fatal(err)
     }
 
-    defer server.Shutdown()
-
-    // Run websocket server.
-    wsAddr := fmt.Sprintf("%s:%d", netAddr, wsPort)
-    wsCloser, err := wss.ListenAndServe(wsAddr)
-
-    if err != nil {
-        log.Fatal(err)
-    }
-
-    defer wsCloser.Close()
-    log.Printf("Websocket server listening on ws://%s/", wsAddr)
-
-    session, err := connectToCrossbar()
-    if err == nil {
-        println(session)
-    }
-
-    subscribeMetaOnRegCreate(nxr, realm, session)
-
-    // Wait for SIGINT (CTRL-c), then close servers and exit.
-    shutdown := make(chan os.Signal, 1)
-    signal.Notify(shutdown, os.Interrupt)
-    <-shutdown
-    // Servers close at exit due to defer calls.
+    return server
 }
 
-func subscribeMetaOnRegCreate(nxr router.Router, realm string, session *client.Client) {
-    logger := log.New(os.Stdout, "", log.LstdFlags)
-    cfg := client.Config{
-        Realm:  realm,
-        Logger: logger,
-    }
-    cli, err := client.ConnectLocal(nxr, cfg)
-    if err != nil {
-        return
-    }
+func setupInvocationForwarding(localSession *client.Client, remoteSession *client.Client) {
+
+    regs := make(map[int]string)
 
     onRegCreate := func(event *wamp.Event) {
-
-        if len(event.Arguments) != 0 {
+        if len(event.Arguments) > 0 {
             id, ok := wamp.AsID(event.Arguments[0])
             if ok {
-                println(id)
+                log.Println(id)
             }
 
             if details, ok := wamp.AsDict(event.Arguments[1]); ok {
                 if uri, ok := wamp.AsString(details["uri"]); ok {
+
                     eventHandler := func(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
-
-                        response, _ := cli.Call(ctx, uri, wamp.Dict{}, inv.Arguments, inv.ArgumentsKw, nil)
-
+                        response, _ := localSession.Call(ctx, uri, wamp.Dict{}, inv.Arguments, inv.ArgumentsKw, nil)
                         return client.InvokeResult{Args: response.Arguments, Kwargs: response.ArgumentsKw}
                     }
 
-
-                    session.Register(uri, eventHandler, wamp.Dict{})
+                    err := remoteSession.Register(uri, eventHandler, wamp.Dict{})
+                    if err != nil {
+                        log.Println("We got a problem here....")
+                    } else {
+                        regs[int(id)] = uri
+                    }
                 }
             }
         }
     }
 
-    err = cli.Subscribe(metaEventRegOnCreate, onRegCreate, nil)
-    if err != nil {
-        logger.Fatal("subscribe error:", err)
+    onRegDelete := func(event *wamp.Event) {
+        if len(event.Arguments) > 0 {
+            id, ok := wamp.AsID(event.Arguments[0])
+            if ok {
+                if uri, ok := regs[int(id)]; ok {
+                    // Success of failure, we need to remove registration from our store
+                    _ = remoteSession.Unregister(uri)
+                    delete(regs, int(id))
+                }
+            }
+        }
     }
-    logger.Println("Subscribed to", metaEventRegOnCreate)
+
+    err := localSession.Subscribe(metaEventRegOnCreate, onRegCreate, nil)
+    if err != nil {
+        log.Fatal("subscribe error:", err)
+    }
+    log.Println("Subscribed to", metaEventRegOnCreate)
+
+    err = localSession.Subscribe(metaEventRegOnDelete, onRegDelete, nil)
+    if err != nil {
+        log.Fatal("subscribe error:", err)
+    }
+    log.Println("Subscribed to", metaEventRegOnDelete)
 }
 
+func setupEventForwarding(localSession *client.Client, remoteSession *client.Client) {
+    log.Println(localSession, remoteSession)
+}
 
-func connectToCrossbar() (*client.Client, error) {
+func constructLinkConfig(privateKeyHex string, realm string) client.Config {
     helloDict := wamp.Dict{}
-    helloDict["authid"] = "node1"
     helloDict["authrole"] = "router2router"
 
-    privkey, _ := hex.DecodeString("1c0ecd558e88e9fc51c10e0373a582bdb11db7d14e9bd514fa2703a92b7a5617")
-    var pvk = ed25519.NewKeyFromSeed(privkey)
-
+    privkey, _ := hex.DecodeString(privateKeyHex)
+    pvk := ed25519.NewKeyFromSeed(privkey)
     key := pvk.Public().(ed25519.PublicKey)
     publicKey := hex.EncodeToString(key)
+
     helloDict["authextra"] = wamp.Dict{"pubkey": publicKey}
 
-
     cfg := client.Config{
-        Realm:         "realm1",
+        Realm:         realm,
         HelloDetails:  helloDict,
         Serialization: serialize.CBOR,
         AuthHandlers: map[string]client.AuthFunc{
@@ -177,19 +203,29 @@ func connectToCrossbar() (*client.Client, error) {
         },
     }
 
-    session, err := client.ConnectNet(context.Background(), "tcp://localhost:8081", cfg)
+    return cfg
+}
+
+func connectRemoteLeg(remoteRouterURL string, config client.Config, localRouter router.Router,
+    reconnectSeconds time.Duration) (*client.Client, error) {
+
+    remoteSession, err := client.ConnectNet(context.Background(), remoteRouterURL, config)
 
     if err != nil {
-        time.Sleep(5 * time.Second)
-        connectToCrossbar()
-        fmt.Println(err)
+        log.Println(fmt.Sprintf("Unable to connect to remote leg, retrying in %d seconds", reconnectSeconds))
+        time.Sleep(reconnectSeconds * time.Second)
+        return connectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
     } else {
-        println(session.Connected())
-        // FIXME: use a better logger and only print such messages in debug mode.
-        //logger.Println("Connected to ", baseUrl)
+        logger := log.New(os.Stdout, "", log.LstdFlags)
+        cfg := client.Config{
+            Realm:  config.Realm,
+            Logger: logger,
+        }
+        localSession, _ := client.ConnectLocal(localRouter, cfg)
+
+        setupInvocationForwarding(localSession, remoteSession)
+        setupEventForwarding(localSession, remoteSession)
     }
 
-    return session, err
-
-    //defer session.Close()
+    return remoteSession, err
 }
