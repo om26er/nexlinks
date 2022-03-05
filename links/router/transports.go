@@ -22,7 +22,10 @@ func SetupWebSocketTransport(localRouter router.Router, netAddr string, wsPort i
 
 
 func SetupUNIXSocketTransport(localRouter *router.Router, unixSocketPath string) (io.Closer, error) {
-	// Run rawsocket Unix server.
+	// Create rawsocket Unix server.
 	rss := router.NewRawSocketServer(*localRouter)
+	rss.KeepAlive = 30 * time.Second
+
+	// Run rawsocket Unix server.
 	return rss.ListenAndServe("unix", unixSocketPath)
 }

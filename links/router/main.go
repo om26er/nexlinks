@@ -90,6 +90,9 @@ func main() {
 
     // PUBKEY IS 81deeb0a11c4f3919e6c35adc1980516dfd8ca84e01929b51070d6a7d3e6c012
     cfg := ConstructLinkConfig(linkPrivateKey, linkRealm)
+    // Run this function in a goroutine. The code internally makes sure to keep
+    // a connection to the remote leg of the WAMP router, which means in case
+    // the connection is lost, it reconnects.
     go ConnectRemoteLeg(linkRouterURL, &cfg, &nxr, time.Duration(linkReconnectSeconds))
 
     // Wait for SIGINT (CTRL-c), then close servers and exit.
