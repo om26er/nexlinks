@@ -25,6 +25,8 @@ const (
     //metaProcRegGet = string(wamp.MetaProcRegGet)
     metaEventRegOnCreate = string(wamp.MetaEventRegOnCreate)
     metaEventRegOnDelete = string(wamp.MetaEventRegOnDelete)
+    metaEventSubOnCreate = string(wamp.MetaEventSubOnCreate)
+    metaEventSubOnDelete = string(wamp.MetaEventSubOnDelete)
 )
 
 func main() {
@@ -129,12 +131,12 @@ func setupInvocationForwarding(localSession *client.Client, remoteSession *clien
             if details, ok := wamp.AsDict(event.Arguments[1]); ok {
                 if uri, ok := wamp.AsString(details["uri"]); ok {
 
-                    eventHandler := func(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
+                    invocationHandler := func(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
                         response, _ := localSession.Call(ctx, uri, wamp.Dict{}, inv.Arguments, inv.ArgumentsKw, nil)
                         return client.InvokeResult{Args: response.Arguments, Kwargs: response.ArgumentsKw}
                     }
 
-                    err := remoteSession.Register(uri, eventHandler, wamp.Dict{})
+                    err := remoteSession.Register(uri, invocationHandler, wamp.Dict{})
                     if err != nil {
                         log.Println("We got a problem here....")
                     } else {
@@ -172,7 +174,58 @@ func setupInvocationForwarding(localSession *client.Client, remoteSession *clien
 }
 
 func setupEventForwarding(localSession *client.Client, remoteSession *client.Client) {
-    log.Println(localSession, remoteSession)
+    subs := make(map[int]string)
+
+    onSubCreate := func(event *wamp.Event) {
+        if len(event.Arguments) > 0 {
+           id, _ := wamp.AsID(event.Arguments[0])
+
+           if details, ok := wamp.AsDict(event.Arguments[1]); ok {
+               log.Println(event.Arguments[1])
+               if topic, ok := wamp.AsString(details["uri"]); ok {
+                   eventHandler := func(event *wamp.Event) {
+                       err := localSession.Publish(topic, wamp.Dict{}, event.Arguments, event.ArgumentsKw)
+                       if err != nil {
+                           return
+                       }
+                   }
+
+                   err := remoteSession.Subscribe(topic, eventHandler, nil)
+                   if err != nil {
+                       log.Println("We got a problem here....")
+                   } else {
+                       subs[int(id)] = topic
+                   }
+               }
+           }
+        }
+    }
+
+    onSubDelete := func(event *wamp.Event) {
+        if len(event.Arguments) > 0 {
+           id, ok := wamp.AsID(event.Arguments[0])
+           if ok {
+               if uri, ok := subs[int(id)]; ok {
+                   // Success of failure, we need to remove registration from our store
+                   _ = remoteSession.Unsubscribe(uri)
+                   delete(subs, int(id))
+                   log.Println(fmt.Sprintf("Unsubscribed topic %s", uri))
+               }
+           }
+        }
+    }
+
+    err := localSession.Subscribe(metaEventSubOnCreate, onSubCreate, nil)
+    if err != nil {
+        log.Fatal("subscribe error:", err)
+    }
+    log.Println("Subscribed to", metaEventSubOnCreate)
+
+    err = localSession.Subscribe(metaEventSubOnDelete, onSubDelete, nil)
+    if err != nil {
+        log.Fatal("subscribe error:", err)
+    }
+    log.Println("Subscribed to", metaEventSubOnDelete)
 }
 
 func constructLinkConfig(privateKeyHex string, realm string) client.Config {
