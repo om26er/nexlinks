@@ -52,8 +52,7 @@ func main() {
                 URI:           wamp.URI(realm),
                 AnonymousAuth: true,
                 AllowDisclose: true,
-                MetaStrict: false,
-                StrictURI: false,
+                MetaStrict: true,
             },
         },
     }
