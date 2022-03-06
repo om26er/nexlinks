@@ -68,7 +68,7 @@ func main() {
     wsCloser, err := SetupWebSocketTransport(nxr, netAddr, wsPort)
     if err == nil {
         log.Printf("Websocket server listening on ws://%s:%d/ws", netAddr, wsPort)
-        _ = wsCloser.Close()
+        defer wsCloser.Close()
     } else {
         log.Fatal(err)
     }
@@ -77,10 +77,10 @@ func main() {
     sockPath := "/tmp/nexus.sock"
     udsCloser, err := SetupUNIXSocketTransport(&nxr, sockPath)
     if err == nil {
-        log.Printf("UDS listening on unix://%s", sockPath)
-        _ = udsCloser.Close()
+       log.Printf("UDS listening on unix://%s", sockPath)
+       defer udsCloser.Close()
     } else {
-        log.Fatal(err)
+       log.Fatal(err)
     }
 
     // FIXME: make service discovery configurable
