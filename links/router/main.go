@@ -2,7 +2,8 @@ package main
 
 import (
     "flag"
-    "log"
+    "fmt"
+    "github.com/sirupsen/logrus"
     "os"
     "os/signal"
     "time"
@@ -45,6 +46,8 @@ func main() {
     flag.IntVar(&linkReconnectSeconds, "link-reconnect-interval", linkReconnectSeconds, "RLink reconnect interval")
     flag.Parse()
 
+    logger := logrus.New()
+
     // Create router instance.
     routerConfig := &router.Config{
             RealmConfigs: []*router.RealmConfig{
@@ -61,26 +64,26 @@ func main() {
     if err == nil {
         defer nxr.Close()
     } else {
-        log.Fatal(err)
+        logger.Fatal(err)
     }
 
     // Setup listening websocket transport
     wsCloser, err := SetupWebSocketTransport(nxr, netAddr, wsPort)
     if err == nil {
-        log.Printf("Websocket server listening on ws://%s:%d/ws", netAddr, wsPort)
+        logger.Infoln(fmt.Sprintf("Websocket server listening on ws://%s:%d/ws", netAddr, wsPort))
         defer wsCloser.Close()
     } else {
-        log.Fatal(err)
+        logger.Fatal(err)
     }
 
     // Setup listening unix socket transport
     sockPath := "/tmp/nexus.sock"
     udsCloser, err := SetupUNIXSocketTransport(&nxr, sockPath)
     if err == nil {
-       log.Printf("UDS listening on unix://%s", sockPath)
+       logger.Infoln(fmt.Sprintf("UDS listening on %s", sockPath))
        defer udsCloser.Close()
     } else {
-       log.Fatal(err)
+       logger.Fatal(err)
     }
 
     // FIXME: make service discovery configurable
