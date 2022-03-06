@@ -56,6 +56,11 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 	regs := make(map[int]string)
 
 	onRegCreate := func(event *wamp.Event) {
+		if !remoteSession.Connected() {
+			logger.Println("Not forwarding invocation, remote connection doesn't exist")
+			return
+		}
+
 		if id, ok := wamp.AsID(event.Arguments[0]); ok {
 			if details, ok := wamp.AsDict(event.Arguments[1]); ok {
 				if uri, ok := wamp.AsString(details["uri"]); ok {
@@ -63,11 +68,6 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 					invocationHandler := func(ctx context.Context, inv *wamp.Invocation) client.InvokeResult {
 						response, _ := localSession.Call(ctx, uri, wamp.Dict{}, inv.Arguments, inv.ArgumentsKw, nil)
 						return client.InvokeResult{Args: response.Arguments, Kwargs: response.ArgumentsKw}
-					}
-
-					if !remoteSession.Connected() {
-						logger.Println("Not forwarding invocation, remote connection doesn't exist")
-						return
 					}
 
 					err := remoteSession.Register(uri, invocationHandler, wamp.Dict{})
@@ -82,12 +82,13 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 	}
 
 	onRegDelete := func(event *wamp.Event) {
+		if !remoteSession.Connected() {
+			return
+		}
+
 		id, ok := wamp.AsID(event.Arguments[0])
 		if ok {
 			if uri, ok := regs[int(id)]; ok {
-				if !remoteSession.Connected() {
-					return
-				}
 				// Success of failure, we need to remove registration from our store
 				_ = remoteSession.Unregister(uri)
 				delete(regs, int(id))
@@ -145,6 +146,11 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 	subs := make(map[int]string)
 
 	onSubCreate := func(event *wamp.Event) {
+		if !remoteSession.Connected() {
+			logger.Println("Not forwarding event, remote connection doesn't exist")
+			return
+		}
+
 		id, _ := wamp.AsID(event.Arguments[0])
 
 		if details, ok := wamp.AsDict(event.Arguments[1]); ok {
@@ -154,11 +160,6 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 					if err != nil {
 						return
 					}
-				}
-
-				if !remoteSession.Connected() {
-					logger.Println("Not forwarding event, remote connection doesn't exist")
-					return
 				}
 
 				err := remoteSession.Subscribe(topic, eventHandler, nil)
@@ -172,12 +173,13 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 	}
 
 	onSubDelete := func(event *wamp.Event) {
+		if !remoteSession.Connected() {
+			return
+		}
+
 		id, ok := wamp.AsID(event.Arguments[0])
 		if ok {
 			if uri, ok := subs[int(id)]; ok {
-				if !remoteSession.Connected() {
-					return
-				}
 				// Success of failure, we need to remove registration from our store
 				_ = remoteSession.Unsubscribe(uri)
 				delete(subs, int(id))
