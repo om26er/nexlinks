@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/hex"
 	"flag"
-	"fmt"
 	"github.com/gammazero/nexus/v3/router/auth"
 	"github.com/sirupsen/logrus"
 	"os"
@@ -78,20 +77,20 @@ func main() {
 		logger.Fatal(err)
 	}
 
-	// Setup listening websocket transport
+	// Attach a listening websocket transport to the router
 	wsCloser, err := SetupWebSocketTransport(nxr, netAddr, wsPort)
 	if err == nil {
-		logger.Infoln(fmt.Sprintf("Websocket server listening on ws://%s:%d/ws", netAddr, wsPort))
+		logger.Infof("Websocket server listening on ws://%s:%d/ws", netAddr, wsPort)
 		defer wsCloser.Close()
 	} else {
 		logger.Fatal(err)
 	}
 
-	// Setup listening unix socket transport
+	// Attach a listening unix socket transport to the router
 	sockPath := "/tmp/nexus.sock"
 	udsCloser, err := SetupUNIXSocketTransport(&nxr, sockPath)
 	if err == nil {
-		logger.Infoln(fmt.Sprintf("UDS listening on %s", sockPath))
+		logger.Infof("UDS listening on %s", sockPath)
 		defer udsCloser.Close()
 	} else {
 		logger.Fatal(err)
