@@ -85,7 +85,7 @@
             ],
             "transports": [
                 {
-                    "type": "rawsocket",
+                    "type": "websocket",
                     "endpoint": {
                         "type": "tcp",
                         "port": 8081,
@@ -94,7 +94,7 @@
                     "options": {
                         "max_message_size": 1048576
                     },
-                    "serializers": ["cbor"],
+                    "serializers": ["cbor", "msgpack", "json"],
                     "auth": {
                         "cryptosign": {
                             "type": "static",
@@ -102,48 +102,15 @@
                                 "node1": {
                                     "realm": "realm1",
                                     "role": "router2router",
-                                    "authorized_keys": ["81deeb0a11c4f3919e6c35adc1980516dfd8ca84e01929b51070d6a7d3e6c012"]
+                                    "authorized_keys": [
+                                        "81deeb0a11c4f3919e6c35adc1980516dfd8ca84e01929b51070d6a7d3e6c012"
+                                    ]
                                 }
                             }
-                        }
-                    }
-                },
-                {
-                    "type": "web",
-                    "endpoint": {
-                        "type": "tcp",
-                        "port": 8082,
-                        "backlog": 1024
-                    },
-                    "paths": {
-                        "ws": {
-                            "type": "websocket",
-                            "serializers": [
-                                "cbor", "msgpack", "json"
-                            ],
-                            "options": {
-                                "allowed_origins": ["*"],
-                                "allow_null_origin": true,
-                                "enable_webstatus": false,
-                                "max_frame_size": 1048576,
-                                "max_message_size": 1048576,
-                                "auto_fragment_size": 65536,
-                                "fail_by_drop": true,
-                                "open_handshake_timeout": 2500,
-                                "close_handshake_timeout": 1000,
-                                "auto_ping_interval": 10000,
-                                "auto_ping_timeout": 5000,
-                                "auto_ping_size": 12,
-                                "compression": {
-                                    "deflate": {
-                                        "request_no_context_takeover": false,
-                                        "request_max_window_bits": 13,
-                                        "no_context_takeover": false,
-                                        "max_window_bits": 13,
-                                        "memory_level": 5
-                                    }
-                                }
-                            }
+                        },
+                        "anonymous": {
+                            "type": "static",
+                            "role": "anonymous"
                         }
                     }
                 }
