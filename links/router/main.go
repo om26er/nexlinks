@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"github.com/gammazero/nexus/v3/router/auth"
 	"github.com/sirupsen/logrus"
 	"os"
 	"os/signal"
@@ -48,6 +50,14 @@ func main() {
 
 	logger := logrus.New()
 
+	var tks = &keyStore{
+		provider:  "static",
+		publicKey: "f1c01c480112705361beb5e4eda8544f951abb7ca918f76327a3a5240f352292",
+	}
+
+	cryptosign := auth.NewCryptoSignAuthenticator(tks, 10 * time.Second)
+	anonymous := auth.AnonymousAuth{ AuthRole: "anonymous" }
+
 	// Create router instance.
 	routerConfig := &router.Config{
 		RealmConfigs: []*router.RealmConfig{
@@ -56,6 +66,7 @@ func main() {
 				AnonymousAuth: true,
 				AllowDisclose: true,
 				MetaStrict:    true,
+				Authenticators: []auth.Authenticator{cryptosign, &anonymous},
 			},
 		},
 	}
@@ -102,3 +113,19 @@ func main() {
 	signal.Notify(shutdown, os.Interrupt)
 	<-shutdown
 }
+
+type keyStore struct {
+	provider  string
+	publicKey string
+}
+
+func (ks *keyStore) AuthKey(authid, authmethod string) ([]byte, error) {
+	return hex.DecodeString(ks.publicKey)
+}
+
+func (ks *keyStore) AuthRole(authid string) (string, error) { return "user", nil }
+
+// PasswordInfo Not used when using WAMP cryptosign authentication
+func (ks *keyStore) PasswordInfo(authid string) (string, int, int) { return "", 0, 0 }
+
+func (ks *keyStore) Provider() string { return ks.provider }

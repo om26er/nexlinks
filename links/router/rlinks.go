@@ -17,12 +17,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var remoteSession *client.Client
+
 func ConnectRemoteLeg(remoteRouterURL string, config *client.Config, localRouter *router.Router,
 	reconnectSeconds time.Duration) {
 
 	logger := logrus.New()
 
-	remoteSession, err := client.ConnectNet(context.Background(), remoteRouterURL, *config)
+	_session, err := client.ConnectNet(context.Background(), remoteRouterURL, *config)
+	remoteSession = _session
 
 	if err != nil {
 		logger.Warnln(fmt.Sprintf("Unable to connect to remote leg, retrying in %d seconds", reconnectSeconds))
@@ -32,7 +35,7 @@ func ConnectRemoteLeg(remoteRouterURL string, config *client.Config, localRouter
 			ConnectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
 		})
 	} else {
-		logger.Info("Established remote connection.")
+		logger.Infoln("Established remote connection.")
 
 		// Once the connection to the remote router is established, now
 		// we start a new WAMP session on the local WAMP router, which
@@ -44,8 +47,8 @@ func ConnectRemoteLeg(remoteRouterURL string, config *client.Config, localRouter
 		}
 		localSession, _ := client.ConnectLocal(*localRouter, cfg)
 
-		SetupInvocationForwarding(localSession, remoteSession, logger)
-		SetupEventForwarding(localSession, remoteSession, logger)
+		SetupInvocationForwarding(localSession, logger)
+		SetupEventForwarding(localSession, logger)
 
 		select {
 		case <- remoteSession.Done():
@@ -57,12 +60,11 @@ func ConnectRemoteLeg(remoteRouterURL string, config *client.Config, localRouter
 	}
 }
 
-func SetupInvocationForwarding(localSession *client.Client, remoteSession *client.Client, logger *logrus.Logger) {
-
+func SetupInvocationForwarding(localSession *client.Client, logger *logrus.Logger) {
 	regs := make(map[int]string)
 
 	onRegCreate := func(event *wamp.Event) {
-		if !remoteSession.Connected() {
+		if remoteSession != nil && !remoteSession.Connected() {
 			logger.Warnln("Not forwarding invocation, remote connection doesn't exist")
 			return
 		}
@@ -123,6 +125,7 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 						if err == nil {
 							if id, ok := wamp.AsID(id); ok {
 								regs[int(id)] = uri
+								logger.Debugf("Registered existed procedure '%s' on remote leg ", uri)
 							}
 						} else {
 							logger.Errorln(err)
@@ -151,11 +154,11 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 	logger.Debugln("Subscribed to", metaEventRegOnDelete)
 }
 
-func SetupEventForwarding(localSession *client.Client, remoteSession *client.Client, logger *logrus.Logger) {
+func SetupEventForwarding(localSession *client.Client, logger *logrus.Logger) {
 	subs := make(map[int]string)
 
 	onSubCreate := func(event *wamp.Event) {
-		if !remoteSession.Connected() {
+		if remoteSession != nil && !remoteSession.Connected() {
 			logger.Warnln("Not forwarding event, remote connection doesn't exist")
 			return
 		}
@@ -232,6 +235,7 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 						if err == nil {
 							if id, ok := wamp.AsID(id); ok {
 								subs[int(id)] = uri
+								logger.Debugf("Forwarded existed subscription '%s' to remote leg.", uri)
 							}
 						} else {
 							logger.Errorln(err)
