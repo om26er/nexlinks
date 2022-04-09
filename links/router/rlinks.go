@@ -200,7 +200,7 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 				// Success of failure, we need to remove registration from our store
 				_ = remoteSession.Unsubscribe(uri)
 				delete(subs, int(id))
-				logger.Infoln(fmt.Sprintf("Unsubscribed topic %s", uri))
+				logger.Debugln(fmt.Sprintf("Unsubscribed topic %s", uri))
 			}
 		}
 	}
