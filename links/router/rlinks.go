@@ -4,10 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	//"log"
-
-	//"log"
-	//"os"
 	"strings"
 	"time"
 
@@ -30,12 +26,18 @@ func ConnectRemoteLeg(remoteRouterURL string, config *client.Config, localRouter
 
 	if err != nil {
 		logger.Warnln(fmt.Sprintf("Unable to connect to remote leg, retrying in %d seconds", reconnectSeconds))
+		// In case we are unable to connect to the remote router, schedule
+		// reconnect attempt based on `reconnectSeconds` value.
 		time.AfterFunc(reconnectSeconds * time.Second, func() {
 			ConnectRemoteLeg(remoteRouterURL, config, localRouter, reconnectSeconds)
 		})
 	} else {
-		logger.Info("Established remote connection")
+		logger.Info("Established remote connection.")
 
+		// Once the connection to the remote router is established, now
+		// we start a new WAMP session on the local WAMP router, which
+		// essentially acts as a relay between the local router and the
+		// remote router.
 		cfg := client.Config{
 			Realm:  config.Realm,
 			Logger: logger,
@@ -133,6 +135,9 @@ func SetupInvocationForwarding(localSession *client.Client, remoteSession *clien
 		}
 	}
 
+	// We subscribe to the session meta API, which essentially notifies
+	// our code when a new registration is created OR existing is
+	// unregistered on the local router
 	err = localSession.Subscribe(metaEventRegOnCreate, onRegCreate, nil)
 	if err != nil {
 		logger.Fatal("subscribe error:", err)
