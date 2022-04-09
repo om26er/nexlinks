@@ -27,6 +27,21 @@
                                         "publisher": false
                                     },
                                     "cache": true
+                                },
+                                {
+                                    "uri": "",
+                                    "match": "wildcard",
+                                    "allow": {
+                                        "call": true,
+                                        "register": true,
+                                        "publish": true,
+                                        "subscribe": true
+                                    },
+                                    "disclose": {
+                                        "caller": false,
+                                        "publisher": false
+                                    },
+                                    "cache": true
                                 }
                             ]
                         },
@@ -45,6 +60,21 @@
                                     "disclose": {
                                         "caller": true,
                                         "publisher": true
+                                    },
+                                    "cache": true
+                                },
+                                {
+                                    "uri": "",
+                                    "match": "wildcard",
+                                    "allow": {
+                                        "call": true,
+                                        "register": true,
+                                        "publish": true,
+                                        "subscribe": true
+                                    },
+                                    "disclose": {
+                                        "caller": false,
+                                        "publisher": false
                                     },
                                     "cache": true
                                 }

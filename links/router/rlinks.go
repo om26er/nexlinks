@@ -160,18 +160,31 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 		if details, ok := wamp.AsDict(event.Arguments[1]); ok {
 			if topic, ok := wamp.AsString(details["uri"]); ok {
 				eventHandler := func(event *wamp.Event) {
-					err := localSession.Publish(topic, wamp.Dict{}, event.Arguments, event.ArgumentsKw)
-					if err != nil {
-						return
+					if topic, ok := wamp.AsString(event.Details["topic"]); ok {
+						err := localSession.Publish(topic, wamp.Dict{}, event.Arguments, event.ArgumentsKw)
+						if err != nil {
+							return
+						}
 					}
 				}
 
-				err := remoteSession.Subscribe(topic, eventHandler, nil)
-				if err == nil {
-					subs[int(id)] = topic
-				} else {
-					logger.Errorln(err)
+				if match, ok := wamp.AsString(details["match"]); ok {
+
+					var err error
+
+					if match == "wildcard" {
+						err = remoteSession.Subscribe(topic, eventHandler, wamp.SetOption(nil, "match", "wildcard"))
+					} else {
+						err = remoteSession.Subscribe(topic, eventHandler, wamp.SetOption(nil, "match", "exact"))
+					}
+
+					if err == nil {
+						subs[int(id)] = topic
+					} else {
+						logger.Errorln(err)
+					}
 				}
+
 			}
 		}
 	}
@@ -210,7 +223,6 @@ func SetupEventForwarding(localSession *client.Client, remoteSession *client.Cli
 								return
 							}
 						}
-
 						err := remoteSession.Subscribe(uri, eventHandler, nil)
 						if err == nil {
 							if id, ok := wamp.AsID(id); ok {
