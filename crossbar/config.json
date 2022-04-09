@@ -29,7 +29,7 @@
                                     "cache": true
                                 },
                                 {
-                                    "uri": "",
+                                    "uri": "*",
                                     "match": "wildcard",
                                     "allow": {
                                         "call": true,
@@ -64,7 +64,7 @@
                                     "cache": true
                                 },
                                 {
-                                    "uri": "",
+                                    "uri": "*",
                                     "match": "wildcard",
                                     "allow": {
                                         "call": true,
